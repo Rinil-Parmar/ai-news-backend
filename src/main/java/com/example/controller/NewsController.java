@@ -1,7 +1,7 @@
 package com.example.controller;
 
 import com.example.model.ApiResponse;
-import com.example.newsapi.model.NewsArticle;
+import com.example.model.NewsArticle;
 import com.example.service.NewsService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -20,7 +20,6 @@ public class NewsController {
         this.service = service;
     }
 
-    // Primary: use POST to trigger heavy API calls
     @PostMapping("/init")
     public ResponseEntity<ApiResponse<Map<String, Object>>> initializePost(
             @RequestParam(defaultValue = "1000") Integer min,
@@ -32,7 +31,6 @@ public class NewsController {
         return ResponseEntity.ok(new ApiResponse<>("success", "Initialization completed", result));
     }
 
-    // Convenience GET (in case you want to call from browser) — still triggers initialization
     @GetMapping("/init")
     public ResponseEntity<ApiResponse<Map<String, Object>>> initializeGet(
             @RequestParam(defaultValue = "1000") Integer min,
@@ -42,12 +40,9 @@ public class NewsController {
 
     @GetMapping
     public ResponseEntity<ApiResponse<List<NewsArticle>>> listFromDb(
-            @RequestParam(defaultValue = "en") String lang,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
-
-        List<NewsArticle> data = service.findAllFromDb(page, size);
-        return ResponseEntity.ok(new ApiResponse<>("success", "Articles from DB", data));
+        return ResponseEntity.ok(new ApiResponse<>("success", "Articles from DB", service.findAllFromDb(page, size)));
     }
 
     @GetMapping("/{id}")
@@ -60,7 +55,6 @@ public class NewsController {
 
     @GetMapping("/english")
     public ResponseEntity<ApiResponse<List<NewsArticle>>> getEnglishArticles() {
-        List<NewsArticle> data = service.findByLanguage("en");
-        return ResponseEntity.ok(new ApiResponse<>("success", "English articles", data));
+        return ResponseEntity.ok(new ApiResponse<>("success", "English articles", service.findByLanguage("en")));
     }
 }

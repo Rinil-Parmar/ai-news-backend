@@ -1,9 +1,8 @@
 package com.example.service;
 
-import com.example.newsapi.model.NewsArticle;
+import com.example.model.NewsArticle;
 import com.example.repository.NewsRepository;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
@@ -27,7 +26,7 @@ public class NewsService {
 
     /**
      * Initialize DB with at least minCount articles (default 1000).
-     * Returns summary map.
+     * Fixed: continues fetching pages until minCount is reached.
      */
     public Map<String, Object> initializeBulkEnglishNews(Integer minCount, String lang) {
         if (minCount == null || minCount <= 0) minCount = 1000;
@@ -36,8 +35,6 @@ public class NewsService {
         long totalBefore = repository.count();
         int savedThisRun = 0;
         int page = 1;
-
-        // Safety: limit pages to avoid infinite loops
         int maxPages = 1000;
 
         while (totalBefore + savedThisRun < minCount && page <= maxPages) {
@@ -45,7 +42,6 @@ public class NewsService {
             try {
                 resp = gNewsClient.fetchTopHeadlines(lang, page, pageSize);
             } catch (Exception e) {
-                // Stop on client exception, return partial result
                 Map<String, Object> err = new HashMap<>();
                 err.put("error", "GNews request failed: " + e.getMessage());
                 err.put("savedThisRun", savedThisRun);
@@ -54,31 +50,29 @@ public class NewsService {
             }
 
             if (resp == null || !resp.containsKey("articles")) break;
+
+            @SuppressWarnings("unchecked")
             List<Map<String, Object>> articles = (List<Map<String, Object>>) resp.get("articles");
             if (articles == null || articles.isEmpty()) break;
 
             for (Map<String, Object> m : articles) {
                 String url = safeGetString(m, "url");
-                if (url == null || url.isBlank()) continue;
+                if (url == null || url.isBlank() || repository.existsByUrl(url)) continue;
+
+                NewsArticle article = mapToArticle(m, lang);
                 try {
-                    if (repository.existsByUrl(url)) {
-                        continue;
-                    }
-                    NewsArticle n = mapToArticle(m, lang);
-                    repository.save(n);
+                    repository.save(article);
                     savedThisRun++;
                 } catch (Exception ex) {
-                    // skip duplicates / insertion errors
+                    // skip duplicates or insertion errors
                 }
+
                 if (totalBefore + savedThisRun >= minCount) break;
             }
 
-            // if less than pageSize returned, likely no more pages
-            if (articles.size() < pageSize) break;
+            System.out.println("Page " + page + " fetched " + articles.size() + " articles, total saved this run: " + savedThisRun);
 
             page++;
-
-            // polite pause to avoid rate limit — adjust or remove if you have high quota
             try { Thread.sleep(500); } catch (InterruptedException ignored) {}
         }
 
@@ -92,9 +86,7 @@ public class NewsService {
     public List<NewsArticle> findAllFromDb(int page, int size) {
         if (page < 0) page = 0;
         if (size <= 0) size = 20;
-
-        Page<NewsArticle> paged = repository.findAll(PageRequest.of(page, size));
-        return paged.getContent();
+        return repository.findAll(PageRequest.of(page, size)).getContent();
     }
 
     public Optional<NewsArticle> findById(String id) {
@@ -119,11 +111,15 @@ public class NewsService {
         n.setContent(safeGetString(m, "content"));
         n.setUrl(safeGetString(m, "url"));
         n.setImage(safeGetString(m, "image"));
+
         String published = safeGetString(m, "publishedAt");
         if (published != null) {
             try { n.setPublishedAt(Instant.parse(published)); } catch (Exception e) { n.setPublishedAt(Instant.now()); }
         } else n.setPublishedAt(Instant.now());
-        n.setLang(safeGetString(m, "lang") == null ? defaultLang : safeGetString(m, "lang"));
+
+        n.setLang(safeGetString(m, "lang") != null ? safeGetString(m, "lang") : defaultLang);
+
+        @SuppressWarnings("unchecked")
         Map<String, Object> s = (Map<String, Object>) m.get("source");
         if (s != null) {
             n.setSourceId(safeGetString(s, "id"));

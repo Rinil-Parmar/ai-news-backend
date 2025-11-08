@@ -24,6 +24,7 @@ public class GNewsClient {
         this.baseUrl = baseUrl;
     }
 
+    @SuppressWarnings("unchecked")
     public Map<String, Object> fetchTopHeadlines(String lang, int page, int max) {
         String url = UriComponentsBuilder.fromHttpUrl(baseUrl + "/top-headlines")
                 .queryParam("token", apiKey)
@@ -32,7 +33,7 @@ public class GNewsClient {
                 .queryParam("max", max)
                 .toUriString();
         try {
-            ResponseEntity<Map> resp = restTemplate.getForEntity(url, Map.class);
+            ResponseEntity<Map<String, Object>> resp = restTemplate.getForEntity(url, (Class<Map<String, Object>>) (Class<?>) Map.class);
             return resp.getBody();
         } catch (RestClientException e) {
             throw new RuntimeException("GNews fetchTopHeadlines failed: " + e.getMessage(), e);
