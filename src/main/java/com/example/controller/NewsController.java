@@ -22,7 +22,7 @@ public class NewsController {
 
     @PostMapping("/init")
     public ResponseEntity<ApiResponse<Map<String, Object>>> initializePost(
-            @RequestParam(defaultValue = "1000") Integer min,
+            @RequestParam(defaultValue = "500") Integer min,
             @RequestParam(defaultValue = "en") String lang) {
         Map<String, Object> result = service.initializeBulkEnglishNews(min, lang);
         if (result.containsKey("error")) {
@@ -33,7 +33,7 @@ public class NewsController {
 
     @GetMapping("/init")
     public ResponseEntity<ApiResponse<Map<String, Object>>> initializeGet(
-            @RequestParam(defaultValue = "1000") Integer min,
+            @RequestParam(defaultValue = "500") Integer min,
             @RequestParam(defaultValue = "en") String lang) {
         return initializePost(min, lang);
     }
@@ -54,7 +54,9 @@ public class NewsController {
     }
 
     @GetMapping("/english")
-    public ResponseEntity<ApiResponse<List<NewsArticle>>> getEnglishArticles() {
-        return ResponseEntity.ok(new ApiResponse<>("success", "English articles", service.findByLanguage("en")));
+    public ResponseEntity<ApiResponse<List<NewsArticle>>> getEnglishArticles(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        return ResponseEntity.ok(new ApiResponse<>("success", "English articles", service.findByLanguage("en", page, size)));
     }
 }
