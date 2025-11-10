@@ -3,6 +3,7 @@ package com.example.service;
 import com.example.model.NewsArticle;
 import com.example.repository.NewsRepository;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
@@ -18,18 +19,17 @@ public class NewsService {
 
     public NewsService(NewsRepository repository,
                        GNewsClient gNewsClient,
-                       @Value("${news.fetch.page-size:100}") int pageSize) {
+                       @Value("${news.fetch.page-size:200}") int pageSize) {
         this.repository = repository;
         this.gNewsClient = gNewsClient;
         this.pageSize = pageSize;
     }
 
     /**
-     * Initialize DB with at least minCount articles (default 1000).
-     * Fixed: continues fetching pages until minCount is reached.
+     * Initialize DB with at least minCount English articles
      */
     public Map<String, Object> initializeBulkEnglishNews(Integer minCount, String lang) {
-        if (minCount == null || minCount <= 0) minCount = 1000;
+        if (minCount == null || minCount <= 0) minCount = 500;
         if (lang == null || lang.isBlank()) lang = "en";
 
         long totalBefore = repository.count();
@@ -55,25 +55,42 @@ public class NewsService {
             List<Map<String, Object>> articles = (List<Map<String, Object>>) resp.get("articles");
             if (articles == null || articles.isEmpty()) break;
 
+            List<NewsArticle> batchToSave = new ArrayList<>();
             for (Map<String, Object> m : articles) {
-                String url = safeGetString(m, "url");
-                if (url == null || url.isBlank() || repository.existsByUrl(url)) continue;
-
-                NewsArticle article = mapToArticle(m, lang);
-                try {
-                    repository.save(article);
-                    savedThisRun++;
-                } catch (Exception ex) {
-                    // skip duplicates or insertion errors
+                // only English articles
+                String detectedLang = safeGetString(m, "lang");
+                if (detectedLang != null && !detectedLang.isBlank() && !"en".equalsIgnoreCase(detectedLang)) {
+                    continue;
                 }
 
-                if (totalBefore + savedThisRun >= minCount) break;
+                String url = safeGetString(m, "url");
+                if (url == null || url.isBlank()) continue;
+
+                // skip duplicates
+                if (repository.existsByUrl(url)) continue;
+
+                NewsArticle article = mapToArticle(m, "en");
+                article.setLang("en");
+                batchToSave.add(article);
             }
 
-            System.out.println("Page " + page + " fetched " + articles.size() + " articles, total saved this run: " + savedThisRun);
+            if (!batchToSave.isEmpty()) {
+                try {
+                    repository.saveAll(batchToSave);
+                    savedThisRun += batchToSave.size();
+                } catch (DataIntegrityViolationException dive) {
+                    // skip duplicates
+                } catch (Exception ex) {
+                    System.out.println("Batch save error: " + ex.getMessage());
+                }
+            }
+
+            System.out.println("Page " + page + " fetched " + articles.size()
+                    + " articles, saved this run: " + savedThisRun
+                    + ", total in db: " + repository.count());
 
             page++;
-            try { Thread.sleep(500); } catch (InterruptedException ignored) {}
+            try { Thread.sleep(300); } catch (InterruptedException ignored) {}
         }
 
         Map<String, Object> result = new LinkedHashMap<>();
@@ -93,15 +110,11 @@ public class NewsService {
         return repository.findById(id);
     }
 
-    public List<NewsArticle> findByLanguage(String lang) {
+    public List<NewsArticle> findByLanguage(String lang, int page, int size) {
         if (lang == null || lang.isBlank()) lang = "en";
-        List<NewsArticle> all = repository.findAll();
-        List<NewsArticle> filtered = new ArrayList<>();
-        for (NewsArticle a : all) {
-            if (lang.equalsIgnoreCase(a.getLang())) filtered.add(a);
-        }
-        return filtered;
+        return repository.findByLang(lang.toLowerCase(), PageRequest.of(page, size)).getContent();
     }
+
 
     private NewsArticle mapToArticle(Map<String, Object> m, String defaultLang) {
         NewsArticle n = new NewsArticle();
@@ -117,7 +130,8 @@ public class NewsService {
             try { n.setPublishedAt(Instant.parse(published)); } catch (Exception e) { n.setPublishedAt(Instant.now()); }
         } else n.setPublishedAt(Instant.now());
 
-        n.setLang(safeGetString(m, "lang") != null ? safeGetString(m, "lang") : defaultLang);
+        String payloadLang = safeGetString(m, "lang");
+        n.setLang(payloadLang != null ? payloadLang.toLowerCase() : defaultLang.toLowerCase());
 
         @SuppressWarnings("unchecked")
         Map<String, Object> s = (Map<String, Object>) m.get("source");
